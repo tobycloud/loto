@@ -6,7 +6,7 @@ export function Master() {
 }
 
 import "tailwindcss/tailwind.css";
-import { wsMasterContext } from "../context/wsMaster";
+import { wsContext } from "../context/ws";
 
 const generateBingoNumbers = () => {
   let numbers = Array.from({ length: 75 }, (_, i) => i + 1);
@@ -14,7 +14,7 @@ const generateBingoNumbers = () => {
 };
 
 const App: React.FC = () => {
-  const { players } = useContext(wsMasterContext);
+  const { clients,roomID } = useContext(wsContext);
   const [bingoNumbers, setBingoNumbers] = useState(generateBingoNumbers());
   const [calledNumbers, setCalledNumbers] = useState<number[]>([]);
 
@@ -28,10 +28,10 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-800 via-gray-900 to-black text-white flex">
-      <Players players={players} />
+      <Players players={clients} />
       <div className="flex-1 flex flex-col items-center">
         <header className="w-full bg-gray-800 p-4 text-center text-lg font-bold">
-          Bingo Master Page
+          Bingo Master Page - Room ID: {roomID}
         </header>
         <main className="flex flex-1 w-full p-4">
           <div className="flex-1 flex flex-col items-center bg-gray-700 rounded-lg shadow-lg p-4">

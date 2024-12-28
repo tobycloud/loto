@@ -1,8 +1,9 @@
 import { useContext } from "react";
 import logoDark from "./logo-dark.svg";
 import logoLight from "./logo-light.svg";
-import { stateContext } from "../context/states";
 import { redirect, useNavigate } from "react-router";
+import { wsContext } from "../context/ws";
+import React from "react";
 
 function uuidv4() {
   return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) =>
@@ -14,21 +15,35 @@ function uuidv4() {
 }
 
 export function Welcome() {
-  const { setState } = useContext(stateContext);
   const navigate = useNavigate();
+  const { ws, setRoom } = useContext(wsContext);
+  const [loading, setLoading] = React.useState(true);
+  const [chooseType, setChooseType] = React.useState(false);
   const createGame = async (
     e: React.MouseEvent<HTMLButtonElement, MouseEvent>
   ) => {
     console.log("create game");
-    const res = await fetch("http://localhost:3000/room/" + uuidv4(), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
-    const data = await res.json();
-    setState({ masterKey: data.masterToken, roomId: data.public.roomName });
+    e.preventDefault();
+    const gameId = uuidv4();
+    ws.send(JSON.stringify({ type: "create", name: gameId }));
     navigate("/master");
+  };
+
+  const joinGame = async (
+    e: React.MouseEvent<HTMLButtonElement, MouseEvent>
+  ) => {
+    console.log("join game");
+    e.preventDefault();
+    const gameId = prompt("Enter the game ID");
+    if (!gameId) return;
+    const res = await fetch(`http://localhost:3000/room/${gameId}`);
+    if (res.status !== 200) {
+      alert("Room not found");
+      return;
+    }
+    setRoom(await res.json());
+    ws.send(JSON.stringify({ type: "join", name: gameId }));
+    navigate("/player");
   };
 
   return (
@@ -57,14 +72,16 @@ export function Welcome() {
             <button
               className="btn btn-primary gap-2"
               onClick={(e) => createGame(e)}
+              disabled={loading}
             >
               Create Game
             </button>
             <button
               className="btn btn-secondary"
-              onClick={() => {
-                console.log("join game");
+              onClick={(e) => {
+                joinGame(e);
               }}
+              disabled={loading}
             >
               Join Game
             </button>

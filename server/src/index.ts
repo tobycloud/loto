@@ -1,7 +1,7 @@
 import cors from "@elysiajs/cors";
 import swagger from "@elysiajs/swagger";
 import { Elysia } from "elysia";
-import { Room } from "../types/common";
+import { Client, Room } from "../types/common";
 
 import { Static, Type } from "@sinclair/typebox";
 import { DiscriminatedUnionValidator } from "typebox-validators/discriminated/discriminated-union-validator";
@@ -23,7 +23,6 @@ const wsMessages = Type.Union(
     Type.Object({
       type: Type.Literal("create"),
       name: Type.String(),
-      size: Type.Number({ minimum: 2, maximum: 99 }),
     }),
     Type.Object({
       type: Type.Literal("join"),
@@ -42,6 +41,10 @@ const wsMessages = Type.Union(
       type: Type.Literal("kick"),
       id: Type.String(),
     }),
+    Type.Object({
+      type: Type.Literal("pick"), // server check if in player number table and in number rolled table then add score to player
+      number: Type.Number(),
+    }),
   ],
   { discriminantKey: "type" }
 );
@@ -54,7 +57,7 @@ const app = new Elysia()
   .use(cors())
 
   .ws("/play", {
-    open: async (ws) => {},
+    open: async (ws) => { },
 
     message: async (ws, message: Object) => {
       try {
@@ -65,7 +68,11 @@ const app = new Elysia()
       const data = message as Static<typeof wsMessages>;
       if (data.type === "create") {
         if (rooms[data.name]) {
-          return ws.send(JSON.stringify({ type: "error", data: "Room already exists" }));
+          return ws.send(JSON.stringify({
+            type: "error",
+            code: 400,
+            data: "Room already exists"
+          }));
         }
         rooms[data.name] = {
           // 🔥
@@ -75,6 +82,7 @@ const app = new Elysia()
             {
               id: ws.id,
               name: data.name,
+              score: 0,
             },
           ],
           masterId: ws.id,
@@ -101,6 +109,7 @@ const app = new Elysia()
         rooms[data.name].clients.push({
           id: ws.id,
           name: data.name,
+          score: 0,
         });
         connectedClients[ws.id] = {
           roomId: data.name,
@@ -115,7 +124,7 @@ const app = new Elysia()
           `room/${data.name}`,
           JSON.stringify({
             type: "client+",
-            data: { id: ws.id, name: data.name },
+            data: { id: ws.id, name: data.name, score: 0 } as Client,
           })
         );
         return;
@@ -142,7 +151,12 @@ const app = new Elysia()
         return ws.send(JSON.stringify({ type: "room-" }));
       }
     },
-    close(ws, code, reason) {},
+    close(ws, code, reason) { },
+  })
+  .get("/room/:name", ctx => {
+    const room = rooms[ctx.params.name];
+    if (!room) ctx.set.status = 404;
+    return room;
   })
 
   .listen(3000);

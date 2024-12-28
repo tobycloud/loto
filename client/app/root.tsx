@@ -9,7 +9,7 @@ import {
 
 import type { Route } from "./+types/root";
 import stylesheet from "./app.css?url";
-import { StateProvider } from "./context/states";
+import { WsProvider } from "./context/ws";
 
 export const links: Route.LinksFunction = () => [
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
@@ -45,9 +45,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    <StateProvider>
+    <WsProvider>
       <Outlet />
-    </StateProvider>
+    </WsProvider>
   );
 }
 

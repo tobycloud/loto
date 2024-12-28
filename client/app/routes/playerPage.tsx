@@ -1,9 +1,8 @@
 import type { Route } from "./+types/home";
 import { useContext } from "react";
-import { stateContext } from "../context/states";
 import { redirect } from "react-router";
-import { WsPlayerProvider } from "../context/wsPlayer";
 import BingoGame from "../player/player";
+import { wsContext } from "../context/ws";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -13,20 +12,11 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export default function MasterPage() {
-  const {
-    state: { roomId },
-  } = useContext(stateContext);
-  if (!roomId) {
-    console.log("no room id");
-    if (typeof window !== "undefined") {
-      window.location.href = "/";
-    }
-    return;
+  const { roomID } = useContext(wsContext);
+  if (!roomID) {
+    window.location.href = "/";
+    return null;
   }
 
-  return (
-    <WsPlayerProvider>
-      <BingoGame />
-    </WsPlayerProvider>
-  );
+  return <BingoGame />;
 }
