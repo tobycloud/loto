@@ -1,179 +1,150 @@
 import cors from "@elysiajs/cors";
 import swagger from "@elysiajs/swagger";
-import { v7 } from "uuid";
-import { Elysia, t } from "elysia";
+import { Elysia } from "elysia";
+import { Room } from "../types/common";
 
-const rooms = {} as {
-  [key: string]: {
-    public: {
-      roomName: string;
-      status: "pending" | "active" | "ended";
-      clients: {
-        id: string;
-        name: string;
-        status: "active" | "inactive";
-      }[];
-    };
-    private: {
-      masterToken: string;
-      masterId?: string;
-      clients: {
-        [key: string]: {
-          id: string;
-        };
-      };
-    };
-  };
-};
-const connectedClients = {} as {
-  [key: string]: {
-    roomId: string;
-  };
-};
+import { Static, Type } from "@sinclair/typebox";
+import { DiscriminatedUnionValidator } from "typebox-validators/discriminated/discriminated-union-validator";
+
+/*
+
+
+
+*/
+
+const rooms: { [name: string]: Room } = {};
+
+const connectedClients: {
+  [id: string]: { roomId: string };
+} = {};
+
+const wsMessages = Type.Union(
+  [
+    Type.Object({
+      type: Type.Literal("create"),
+      name: Type.String(),
+      size: Type.Number({ minimum: 2, maximum: 99 }),
+    }),
+    Type.Object({
+      type: Type.Literal("join"),
+      name: Type.String(),
+    }),
+    Type.Object({
+      type: Type.Literal("start"),
+    }),
+    Type.Object({
+      type: Type.Literal("leave"),
+    }),
+    Type.Object({
+      type: Type.Literal("pull"),
+    }),
+    Type.Object({
+      type: Type.Literal("kick"),
+      id: Type.String(),
+    }),
+  ],
+  { discriminantKey: "type" }
+);
+
+const unionValidator = new DiscriminatedUnionValidator(wsMessages);
 
 const app = new Elysia()
   .get("/", () => "Hello Elysia")
   .use(swagger())
   .use(cors())
-  .ws("/room/master/:id/:token", {
-    open: async (ws) => {
-      if (!rooms[ws.data.params.id]) {
-        return ws.data.error(404, "Room not found");
+
+  .ws("/play", {
+    open: async (ws) => {},
+
+    message: async (ws, message: Object) => {
+      try {
+        unionValidator.assert(message);
+      } catch (error) {
+        return ws.send(JSON.stringify({ type: "error", data: error }));
       }
-      if (
-        rooms[ws.data.params.id].private.masterToken !== ws.data.params.token
-      ) {
-        return ws.data.error(401, "Invalid master token");
-      }
-      if (rooms[ws.data.params.id].private.masterId) {
-        return ws.data.error(401, "Master already connected");
-      }
-      ws.subscribe(`room/${ws.data.params.id}`);
-      ws.publish(
-        `room/${ws.data.params.id}`,
-        JSON.stringify({
-          type: "master",
-          id: ws.id,
-          message: "Master connected",
-        })
-      );
-      rooms[ws.data.params.id].private.masterId = ws.id;
-      connectedClients[ws.id] = {
-        roomId: ws.data.params.id,
-      };
-      ws.send(
-        JSON.stringify({
-          type: "init",
-          id: ws.id,
-          data: rooms[ws.data.params.id].public,
-        })
-      );
-    },
-    message: async (ws, message) => {
-      console.log(message);
-      ws.publish(
-        `room/${ws.data.params.id}`,
-        JSON.stringify({
-          type: "master",
-          id: ws.id,
-          message,
-        })
-      );
-    },
-    close(ws, code, reason) {
-      ws.unsubscribe(`room/${ws.data.params.id}`);
-      console.debug("Master disconnected from room", ws.data.params.id);
-      console.debug("with code", code, "and reason", reason);
-    },
-  })
-  .ws("/room/:id", {
-    open: async (ws) => {
-      if (!rooms[ws.data.params.id]) {
-        return ws.data.error(404, "Room not found");
-      }
-      rooms[ws.data.params.id].public.clients.push({
-        id: ws.id,
-        name: ws.data.params.id,
-        status: "active",
-      });
-      connectedClients[ws.id] = {
-        roomId: ws.data.params.id,
-      };
-      rooms[ws.data.params.id].private.clients[ws.id] = {
-        id: ws.id,
-      };
-      ws.subscribe(`room/${ws.data.params.id}`);
-      ws.publish(
-        `room/${ws.data.params.id}`,
-        JSON.stringify({
-          type: "update",
-          id: ws.id,
-          data: rooms[ws.data.params.id].public,
-        })
-      );
-      ws.send(
-        JSON.stringify({
-          type: "init",
-          id: ws.id,
-          data: rooms[ws.data.params.id].public,
-        })
-      );
-    },
-    message: async (ws, message) => {
-      console.log(message);
-    },
-    close(ws, code, reason) {
-      ws.unsubscribe(`room/${ws.data.params.id}`);
-    },
-  })
-  .post(
-    "/room/:id",
-    ({ params, error }) => {
-      console.log(params);
-      if (rooms[params.id]) {
-        return error(400, "Room already exists");
-      } else {
-        rooms[params.id] = {
-          public: {
-            roomName: params.id,
+      const data = message as Static<typeof wsMessages>;
+      if (data.type === "create") {
+        if (rooms[data.name]) {
+          return ws.send(JSON.stringify({ type: "error", data: "Room already exists" }));
+        }
+        rooms[data.name] = {
+          // 🔥
+          roomName: data.name,
+          status: "pending",
+          clients: [
+            {
+              id: ws.id,
+              name: data.name,
+            },
+          ],
+          masterId: ws.id,
+        };
+        return ws.send(
+          JSON.stringify({
+            type: "room+",
+            roomName: data.name,
             status: "pending",
-            clients: [],
-          },
-          private: {
-            masterToken: v7(),
-            clients: {},
-          },
+          })
+        );
+      }
+
+      if (data.type == "join") {
+        if (!rooms[data.name]) {
+          return ws.send(JSON.stringify({ type: "error", data: "Room not found" }));
+        }
+        if (rooms[data.name].status !== "pending") {
+          return ws.send(JSON.stringify({ type: "error", data: "Room is not pending" }));
+        }
+        if (rooms[data.name].clients.find((client) => client.name === data.name)) {
+          return ws.send(JSON.stringify({ type: "error", data: "Client already connected" }));
+        }
+        rooms[data.name].clients.push({
+          id: ws.id,
+          name: data.name,
+        });
+        connectedClients[ws.id] = {
+          roomId: data.name,
         };
-        return {
-          public: rooms[params.id].public,
-          masterToken: rooms[params.id].private.masterToken,
-        };
+        ws.send(
+          JSON.stringify({
+            type: "room+",
+            data: { roomName: data.name, status: "pending" },
+          })
+        );
+        ws.publish(
+          `room/${data.name}`,
+          JSON.stringify({
+            type: "client+",
+            data: { id: ws.id, name: data.name },
+          })
+        );
+        return;
+      }
+
+      if (data.type == "leave") {
+        const roomId = connectedClients[ws.id]?.roomId;
+        if (!roomId) {
+          return ws.send(JSON.stringify({ type: "error", data: "Not in a room" }));
+        }
+        const room = rooms[roomId];
+        if (room.masterId === ws.id) {
+        } else {
+          room.clients = room.clients.filter((client) => client.id !== ws.id);
+          ws.publish(
+            `room/${roomId}`,
+            JSON.stringify({
+              type: "client-",
+              data: { id: ws.id },
+            })
+          );
+        }
+        delete connectedClients[ws.id];
+        return ws.send(JSON.stringify({ type: "room-" }));
       }
     },
-    {
-      params: t.Object({
-        id: t.String(),
-      }),
-    }
-  )
-  .get(
-    "/room/:id",
-    ({ params }) => {
-      if (rooms[params.id]) {
-        return rooms[params.id].public;
-      } else {
-        return null;
-      }
-    },
-    {
-      params: t.Object({
-        id: t.String(),
-      }),
-    }
-  )
+    close(ws, code, reason) {},
+  })
 
   .listen(3000);
 
-console.log(
-  `🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`
-);
+console.log(`🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`);

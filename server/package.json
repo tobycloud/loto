@@ -8,7 +8,9 @@
   "dependencies": {
     "@elysiajs/cors": "^1.2.0",
     "@elysiajs/swagger": "^1.2.0",
+    "@sinclair/typebox": "^0.34.13",
     "elysia": "latest",
+    "typebox-validators": "^0.3.5",
     "uuid": "^11.0.3"
   },
   "devDependencies": {
