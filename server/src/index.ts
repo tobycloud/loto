@@ -1,7 +1,8 @@
 import cors from "@elysiajs/cors";
 import swagger from "@elysiajs/swagger";
-import { Elysia } from "elysia";
-import { Client, Room } from "../types/common";
+import { Elysia, t } from "elysia";
+import { Board, exampleBoard, Room } from "../../types/common";
+import { Errors } from "../../types/errors";
 
 import { Static, Type } from "@sinclair/typebox";
 import { DiscriminatedUnionValidator } from "typebox-validators/discriminated/discriminated-union-validator";
@@ -14,37 +15,125 @@ import { DiscriminatedUnionValidator } from "typebox-validators/discriminated/di
 
 const rooms: { [name: string]: Room } = {};
 
-const connectedClients: {
-  [id: string]: { roomId: string };
+const clientData: {
+  [id: string]: {
+    board: Board;
+  };
 } = {};
 
 const wsMessages = Type.Union(
   [
+    Type.Object(
+      {
+        type: Type.Literal("rename"),
+        name: Type.String({
+          minLength: 1,
+          maxLength: 100,
+          pattern: "^[a-zA-Z0-9_]+$",
+        }),
+      },
+      { required: ["name"], additionalProperties: false }
+    ),
     Type.Object({
-      type: Type.Literal("create"),
-      name: Type.String(),
+      type: Type.Literal("pickSet"),
+      set: Type.Object(
+        {
+          "0": Type.Array(
+            Type.Object({
+              value: Type.Number({ minimum: 1, maximum: 10 }),
+              y: Type.Number({ minimum: 0, maximum: 8 }),
+            }),
+            { minItems: 5, maxItems: 5 }
+          ),
+          "1": Type.Array(
+            Type.Object({
+              value: Type.Number({ minimum: 11, maximum: 20 }),
+              y: Type.Number({ minimum: 0, maximum: 8 }),
+            }),
+            { minItems: 5, maxItems: 5 }
+          ),
+          "2": Type.Array(
+            Type.Object({
+              value: Type.Number({ minimum: 21, maximum: 30 }),
+              y: Type.Number({ minimum: 0, maximum: 8 }),
+            }),
+            { minItems: 5, maxItems: 5 }
+          ),
+          "3": Type.Array(
+            Type.Object({
+              value: Type.Number({ minimum: 31, maximum: 40 }),
+              y: Type.Number({ minimum: 0, maximum: 8 }),
+            }),
+            { minItems: 5, maxItems: 5 }
+          ),
+          "4": Type.Array(
+            Type.Object({
+              value: Type.Number({ minimum: 41, maximum: 50 }),
+              y: Type.Number({ minimum: 0, maximum: 8 }),
+            }),
+            { minItems: 5, maxItems: 5 }
+          ),
+          "5": Type.Array(
+            Type.Object({
+              value: Type.Number({ minimum: 51, maximum: 60 }),
+              y: Type.Number({ minimum: 0, maximum: 8 }),
+            }),
+            { minItems: 5, maxItems: 5 }
+          ),
+          "6": Type.Array(
+            Type.Object({
+              value: Type.Number({ minimum: 61, maximum: 70 }),
+              y: Type.Number({ minimum: 0, maximum: 8 }),
+            }),
+            { minItems: 5, maxItems: 5 }
+          ),
+          "7": Type.Array(
+            Type.Object({
+              value: Type.Number({ minimum: 71, maximum: 80 }),
+              y: Type.Number({ minimum: 0, maximum: 8 }),
+            }),
+            { minItems: 5, maxItems: 5 }
+          ),
+          "8": Type.Array(
+            Type.Object({
+              value: Type.Number({ minimum: 81, maximum: 90 }),
+              y: Type.Number({ minimum: 0, maximum: 8 }),
+            }),
+            { minItems: 5, maxItems: 5 }
+          ),
+        },
+        {
+          required: ["1", "2", "3", "4", "5", "6", "7", "8", "9"],
+          additionalProperties: false,
+        }
+      ),
     }),
-    Type.Object({
-      type: Type.Literal("join"),
-      name: Type.String(),
-    }),
-    Type.Object({
-      type: Type.Literal("start"),
-    }),
-    Type.Object({
-      type: Type.Literal("leave"),
-    }),
-    Type.Object({
-      type: Type.Literal("pull"),
-    }),
-    Type.Object({
-      type: Type.Literal("kick"),
-      id: Type.String(),
-    }),
-    Type.Object({
-      type: Type.Literal("pick"), // server check if in player number table and in number rolled table then add score to player
-      number: Type.Number(),
-    }),
+    Type.Object(
+      {
+        type: Type.Literal("start"),
+      },
+      { required: ["name"], additionalProperties: false }
+    ),
+    Type.Object(
+      {
+        type: Type.Literal("pull"),
+      },
+      { required: ["name"], additionalProperties: false }
+    ),
+    Type.Object(
+      {
+        type: Type.Literal("kick"),
+        id: Type.String(),
+      },
+      { required: ["name"], additionalProperties: false }
+    ),
+    Type.Object(
+      {
+        type: Type.Literal("pick"), // server check if in player number table and in number rolled table then add score to player
+        number: Type.Number(),
+      },
+      { required: ["name"], additionalProperties: false }
+    ),
   ],
   { discriminantKey: "type" }
 );
@@ -56,107 +145,125 @@ const app = new Elysia()
   .use(swagger())
   .use(cors())
 
-  .ws("/play", {
-    open: async (ws) => { },
+  .ws("/room/:id", {
+    query: t.Object({
+      name: t.String({
+        minLength: 1,
+        maxLength: 100,
+        pattern: "^[a-zA-Z0-9_]+$",
+      }),
+    }),
+
+    open: async (ws) => {
+      const room = ws.data.params.id;
+
+      if (!rooms[room]) {
+        rooms[room] = {
+          name: room,
+          status: "pending",
+          clients: [],
+          masterId: ws.id,
+        };
+      }
+
+      ws.send(
+        JSON.stringify({
+          type: "room+",
+          data: rooms[room],
+        })
+      );
+
+      rooms[room].clients.push({
+        id: ws.id,
+        name: ws.data.query.name,
+        board: exampleBoard,
+      });
+
+      ws.publish(`room/${room}`, JSON.stringify({ type: "room*", data: rooms[room] }));
+
+      ws.subscribe(`room/${room}`);
+    },
 
     message: async (ws, message: Object) => {
       try {
         unionValidator.assert(message);
       } catch (error) {
-        return ws.send(JSON.stringify({ type: "error", data: error }));
-      }
-      const data = message as Static<typeof wsMessages>;
-      if (data.type === "create") {
-        if (rooms[data.name]) {
-          return ws.send(JSON.stringify({
-            type: "error",
-            code: 400,
-            data: "Room already exists"
-          }));
-        }
-        rooms[data.name] = {
-          // 🔥
-          roomName: data.name,
-          status: "pending",
-          clients: [
-            {
-              id: ws.id,
-              name: data.name,
-              score: 0,
-            },
-          ],
-          masterId: ws.id,
-        };
+        if (!(error instanceof Error)) return console.error(error);
+
         return ws.send(
           JSON.stringify({
-            type: "room+",
-            roomName: data.name,
-            status: "pending",
+            type: "error",
+            data: {
+              error: Errors.BAD_MESSAGE,
+              message: error.message,
+            },
           })
         );
       }
+      const data = message as Static<typeof wsMessages>;
 
-      if (data.type == "join") {
-        if (!rooms[data.name]) {
-          return ws.send(JSON.stringify({ type: "error", data: "Room not found" }));
-        }
-        if (rooms[data.name].status !== "pending") {
-          return ws.send(JSON.stringify({ type: "error", data: "Room is not pending" }));
-        }
-        if (rooms[data.name].clients.find((client) => client.name === data.name)) {
-          return ws.send(JSON.stringify({ type: "error", data: "Client already connected" }));
-        }
-        rooms[data.name].clients.push({
-          id: ws.id,
-          name: data.name,
-          score: 0,
-        });
-        connectedClients[ws.id] = {
-          roomId: data.name,
-        };
-        ws.send(
-          JSON.stringify({
-            type: "room+",
-            data: { roomName: data.name, status: "pending" },
-          })
-        );
-        ws.publish(
-          `room/${data.name}`,
-          JSON.stringify({
-            type: "client+",
-            data: { id: ws.id, name: data.name, score: 0 } as Client,
-          })
-        );
-        return;
-      }
+      const room = rooms[ws.data.params.id];
 
-      if (data.type == "leave") {
-        const roomId = connectedClients[ws.id]?.roomId;
-        if (!roomId) {
-          return ws.send(JSON.stringify({ type: "error", data: "Not in a room" }));
+      if (data.type == "pickSet") {
+        const ys = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+        for (const y of Object.values(data.set)) {
+          for (const cell of y) {
+            ys[cell.y] += 1;
+          }
         }
-        const room = rooms[roomId];
-        if (room.masterId === ws.id) {
-        } else {
-          room.clients = room.clients.filter((client) => client.id !== ws.id);
-          ws.publish(
-            `room/${roomId}`,
+
+        if (ys.some((y) => y !== 5)) {
+          return ws.send(
             JSON.stringify({
-              type: "client-",
-              data: { id: ws.id },
+              type: "error",
+              data: {
+                error: Errors.INVALID_SET,
+                message: "Each row must have 5 numbers",
+              },
             })
           );
         }
-        delete connectedClients[ws.id];
-        return ws.send(JSON.stringify({ type: "room-" }));
+
+        const client = clientData[ws.id];
+
+        client.board = data.set;
+      }
+
+      if (data.type == "rename") {
+        if (room.masterId !== ws.id) return;
+
+        room.name = data.name;
+
+        ws.publish(`room/${room}`, JSON.stringify({ type: "room*", data: room }));
+      }
+
+      if (data.type == "start") {
+        if (room.masterId !== ws.id) return;
+
+        room.status = "active";
+
+        ws.publish(`room/${room}`, JSON.stringify({ type: "room*", data: room }));
       }
     },
-    close(ws, code, reason) { },
-  })
-  .get("/room/:name", ctx => {
-    const room = rooms[ctx.params.name];
-    if (!room) ctx.set.status = 404;
-    return room;
+    close(ws, code, reason) {
+      const roomId = ws.data.params.id;
+
+      const room = rooms[roomId];
+
+      if (room.masterId === ws.id) {
+        if (room.clients.length == 0) {
+          delete rooms[roomId];
+          return;
+        }
+
+        // second joined player becomes master
+        room.masterId = room.clients[1].id;
+      }
+
+      room.clients = room.clients.filter((client) => client.id !== ws.id);
+      ws.publish(`room/${roomId}`, JSON.stringify({ type: "room*", data: room })); // room* = room update
+    },
   })
 
   .listen(3000);
